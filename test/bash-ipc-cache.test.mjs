@@ -168,4 +168,62 @@ await test('legacy directories are retained; offline preview writes nothing and 
     assert.equal(fs.existsSync(path.join(root,'.ops-lifecycle-lock')),false)
   })
 })
+
+/** Replace one fs method for the length of `body`; the library shares this same `fs` object. */
+function patched(name, replacement, body) {
+  const original = fs[name]
+  fs[name] = (...args) => replacement(original, ...args)
+  try { return body() } finally { fs[name] = original }
+}
+const failure = (code) => Object.assign(new Error(`${code}: injected`), { code })
+const lockLeftovers = (root) => fs.readdirSync(root).filter((name) => name.startsWith('.ops-lifecycle-lock'))
+
+await test('a failed owner write leaves no lock behind and the next caller acquires it', async () => {
+  await withTempDir('bash-ipc-lock-owner', (home) => {
+    const root = bashIpcRoot(home)
+    let ran = false
+    assert.throws(() => patched('writeFileSync', (original, file, ...rest) => {
+      if (path.basename(String(file)) === 'owner.json') throw failure('ENOSPC')
+      return original(file, ...rest)
+    }, () => withLifecycleLock(root, () => { ran = true })), /ENOSPC/)
+    assert.equal(ran, false)
+    assert.deepEqual(lockLeftovers(root), [], 'neither the lock nor its staging directory survives a failed owner write')
+    assert.equal(withLifecycleLock(root, () => {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.ops-lifecycle-lock', 'owner.json'), 'utf8')).pid, process.pid)
+      return 'second'
+    }), 'second')
+    assert.deepEqual(lockLeftovers(root), [])
+  })
+})
+
+await test('a release failure never replaces the error the locked work threw, and is reported after success', async () => {
+  await withTempDir('bash-ipc-lock-release', (home) => {
+    const root = bashIpcRoot(home)
+    const busyOwner = (original, file, ...rest) => {
+      if (path.basename(String(file)) === 'owner.json') throw failure('EBUSY')
+      return original(file, ...rest)
+    }
+    assert.throws(() => patched('unlinkSync', busyOwner, () => withLifecycleLock(root, () => { throw new Error('the real staging failure') })),
+      /the real staging failure/)
+    // The owner (this process) is alive, so operator recovery rightly refuses; clear it by hand.
+    const lock = path.join(root, '.ops-lifecycle-lock')
+    assert.deepEqual(fs.readdirSync(lock), ['owner.json'])
+    fs.rmSync(lock, { recursive: true })
+    assert.throws(() => patched('unlinkSync', busyOwner, () => withLifecycleLock(root, () => 'done')), /EBUSY/)
+    fs.rmSync(lock, { recursive: true })
+    assert.deepEqual(lockLeftovers(root), [])
+  })
+})
+
+await test('an existing lock, even an empty one from an interrupted older process, is never replaced', async () => {
+  await withTempDir('bash-ipc-lock-busy', (home) => {
+    const root = bashIpcRoot(home)
+    fs.mkdirSync(path.join(root, '.ops-lifecycle-lock'), { recursive: true })
+    let ran = false
+    assert.throws(() => withLifecycleLock(root, () => { ran = true }), /lock is busy or left by an interrupted process/)
+    assert.equal(ran, false)
+    assert.deepEqual(fs.readdirSync(path.join(root, '.ops-lifecycle-lock')), [], 'the abandoned lock is left for the operator')
+    assert.deepEqual(lockLeftovers(root), ['.ops-lifecycle-lock'])
+  })
+})
 report('bash-ipc-cache')

@@ -43,6 +43,36 @@ export function plainTree(target: string): boolean {
     return true
   }catch{return false}
 }
+/** Names a rename-onto-the-lock failure reports when another holder already owns it. Windows reports a
+ * directory that already exists as EPERM/EACCES; POSIX as EEXIST/ENOTEMPTY. */
+function lockBusy(error: unknown): boolean {
+  const code=(error as NodeJS.ErrnoException).code
+  return code==='EEXIST'||code==='ENOTEMPTY'||(process.platform==='win32'&&(code==='EPERM'||code==='EACCES'))
+}
+/** Take the lock in one step: the owner record is written into a private staging directory first and the
+ * directory is renamed onto the lock name, so a failed owner write never leaves a lock behind. An existing
+ * lock (even an empty one left by an older, interrupted process) is never replaced. */
+function acquireLock(root: string, lock: string): boolean {
+  if(fs.existsSync(lock)){assertNoLinks(lock);return false}
+  const stage=path.join(root,'.ops-lifecycle-lock.stage-'+randomUUID())
+  try{
+    fs.mkdirSync(stage)
+    fs.writeFileSync(path.join(stage,'owner.json'),JSON.stringify({pid:process.pid,token})+'\n',{flag:'wx'})
+    fs.renameSync(stage,lock)
+    return true
+  }catch(error){
+    try{fs.rmSync(stage,{recursive:true,force:true})}catch{/* the original error is the one to report */}
+    if(lockBusy(error))return false
+    throw error
+  }
+}
+/** Release the lock; returns the first failure instead of throwing, so it can never hide the caller's error. */
+function releaseLock(lock: string): Error | undefined {
+  let failure: Error | undefined
+  try{fs.unlinkSync(path.join(lock,'owner.json'))}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')failure=error as Error}
+  try{fs.rmdirSync(lock)}catch(error){failure??=error as Error}
+  return failure
+}
 export function withLifecycleLock<T>(root: string, run: ()=>T): T {
   assertNoLinks(root)
   fs.mkdirSync(root,{recursive:true})
@@ -51,17 +81,20 @@ export function withLifecycleLock<T>(root: string, run: ()=>T): T {
   // Bounded wait, no lease expiry: a suspended process must never lose its lock.
   let acquired=false
   for(let attempt=0;attempt<101;attempt++){
-    try{fs.mkdirSync(lock); acquired=true; break}
-    catch(error){
-      if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error
-      assertNoLinks(lock)
-      if(attempt<100)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,50)
-    }
+    if(acquireLock(root,lock)){acquired=true;break}
+    if(attempt<100)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,50)
   }
   if(!acquired)throw Error('Bash IPC lifecycle lock is busy or left by an interrupted process: '+lock+'. Stop all confined shells before manually removing an abandoned lock; no unsafe lock stealing.')
-  fs.writeFileSync(path.join(lock,'owner.json'),JSON.stringify({pid:process.pid,token})+'\n',{flag:'wx'})
   held.add(path.resolve(root))
-  try{return run()}finally{held.delete(path.resolve(root)); fs.unlinkSync(path.join(lock,'owner.json'));fs.rmdirSync(lock)}
+  let failed=false
+  try{return run()}
+  catch(error){failed=true;throw error}
+  finally{
+    held.delete(path.resolve(root))
+    const released=releaseLock(lock)
+    // A failed run keeps its own error; a successful one must not hide that the lock stayed behind.
+    if(released!==undefined&&!failed)throw released
+  }
 }
 /** Explicit operator-only recovery, after stopping every host and confined descendant. */
 export function recoverBashLifecycleLock(root: string, {confirmedStopped=false}: {confirmedStopped?: boolean}={}): void {
