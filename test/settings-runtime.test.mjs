@@ -164,12 +164,13 @@ await test('the shell settings seam waits for host services and owns its teardow
     assert.equal(ctx.typert.local.get('opsSettings/plan'), undefined)
   } finally { await ctx.fiber.dispose() }
 })
-await test('managed selection returns an absolute setting and reports restricted-mode incompatibility', () => {
+await test('managed selection clears the override, names the executable and reports restricted-mode incompatibility', () => {
   const opts = options('select-managed'), service = new RuntimeActions(opts)
   const directory = managed(opts.env, '2.56.0.2')
   const selected = service.select('managed')
-  assert.equal(selected.bashPath, path.join(directory, 'bin/bash.exe'))
-  assert.ok(path.isAbsolute(selected.bashPath))
+  assert.equal(selected.bashPath, null, 'a versioned managed path must not be pinned in bashPath (A-shells-03)')
+  assert.equal(selected.file, path.join(directory, 'bin/bash.exe'))
+  assert.ok(path.isAbsolute(selected.file))
   assert.match(selected.restriction, /verified|restricted|restricted-mode|MSYS|compatib/i)
   assert.deepEqual(service.snapshot().managed.map(entry => entry.version), ['2.56.0.2'])
 })

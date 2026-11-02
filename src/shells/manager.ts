@@ -76,5 +76,9 @@ export function selectBashRuntime(source: 'managed' | 'git', options: BashRuntim
   const file = source === 'managed' ? managed : source === 'git' ? gitBashCandidates(options)[0] : undefined
   if (!file) throw new Error(source === 'managed' ? 'No managed Bash is installed; run dsh-ops bash-runtime install.' : 'No Git Bash installation found; set bashPath to an existing absolute executable.')
   const absolute = path.resolve(file)
-  return { source, file: absolute, config: { bashPath: absolute }, restricted: restrictedCompatibility(absolute, options) }
+  // A managed install lives in a versioned directory that the next pin upgrade removes, so pinning
+  // its path in `bashPath` would make Bash vanish after `bash-runtime install`. The provisioned rung
+  // already selects the managed install when no override is set: managed selection clears it.
+  const bashPath = source === 'managed' ? null : absolute
+  return { source, file: absolute, config: { bashPath }, restricted: restrictedCompatibility(absolute, options) }
 }

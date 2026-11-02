@@ -12,7 +12,8 @@ export interface RuntimeSnapshot {
   /** Installed version of dsh-win-pwsh7, when the profile has it. */
   companion?: string
 }
-export interface RuntimeSelection { bashPath: string; restriction: string }
+/** `bashPath: null` removes the override, so a managed install follows pin upgrades. */
+export interface RuntimeSelection { bashPath: string | null; file: string; restriction: string }
 export interface RuntimeResult {
   status: 'completed' | 'no-update' | 'failed' | 'cancelled' | 'stale' | 'unavailable' | 'busy'
   effectState: 'none' | 'applied' | 'unknown'

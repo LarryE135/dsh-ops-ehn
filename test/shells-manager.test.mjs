@@ -87,7 +87,10 @@ await test('managed selection retains the provisioned store layout and absence i
     assert.throws(() => selectBashRuntime('managed', { env: { DSH_HOME: home }, platform: 'win32', arch: 'x64' }), /bash-runtime install/)
     seed(home, '9.0', false)
     const directory = seed(home, '2.0')
-    assert.equal(selectBashRuntime('managed', { env: { DSH_HOME: home }, platform: 'win32', arch: 'x64' }).file, path.join(directory, 'bin/bash.exe'))
+    const selected = selectBashRuntime('managed', { env: { DSH_HOME: home }, platform: 'win32', arch: 'x64' })
+    assert.equal(selected.file, path.join(directory, 'bin/bash.exe'))
+    // The versioned directory is removed by the next pin upgrade; the provisioned rung follows it instead.
+    assert.deepEqual(selected.config, { bashPath: null }, 'managed selection removes the override (A-shells-03)')
   })
 })
 

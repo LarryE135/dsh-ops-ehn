@@ -43,7 +43,7 @@ export class RuntimeActions {
   }
   select(source: BashSource): RuntimeSelection {
     const selected = selectBashRuntime(parseSource(source), this.options)
-    return { bashPath: selected.file, restriction: selected.restricted.compatible
+    return { bashPath: selected.config.bashPath, file: selected.file, restriction: selected.restricted.compatible
       ? 'This Bash has verified restricted-mode IPC compatibility.'
       : String(selected.restricted.reason ?? 'Restricted modes cannot use this Bash. A supported sandbox/executor remains required.') }
   }
