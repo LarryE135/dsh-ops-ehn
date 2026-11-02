@@ -1,9 +1,10 @@
 /** `dsh-ops panel`: one loopback command that serves the viewer and one capture directory. */
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { JSDOM } from 'jsdom'
-import { createPanelServer, defaultPanelDirectory, inspectPanelDirectory, listenPanel } from '../lib/cli/panel.js'
+import { createPanelServer, defaultPanelDirectory, inspectPanelDirectory, listenPanel, panelHostAllowed } from '../lib/cli/panel.js'
 import { PANEL_FORMAT } from '../lib/panel/collect.js'
 import { renderPanelHtml } from '../lib/panel/render.js'
 import { PACKAGE_ROOT, assert, report, test, withTempDir } from './lib/harness.mjs'
@@ -286,6 +287,37 @@ await test('the real CLI prints a loopback URL, serves the newest report and rej
     const stray = spawnSync(process.execPath, [CLI, 'install', '--profile', 'web', '--serve'], { encoding: 'utf8', timeout: 30_000 })
     assert.equal(stray.status, 1)
     assert.match(stray.stderr, /--serve only applies to the panel command/u)
+  })
+})
+
+await test('only loopback Host headers on the bound port are answered (DNS rebinding)', async () => {
+  assert.equal(panelHostAllowed('127.0.0.1:8123', 8123), true)
+  assert.equal(panelHostAllowed('LOCALHOST:8123', 8123), true)
+  assert.equal(panelHostAllowed('[::1]:8123', 8123), true)
+  assert.equal(panelHostAllowed('attacker.example:8123', 8123), false)
+  assert.equal(panelHostAllowed('127.0.0.1:9999', 8123), false)
+  assert.equal(panelHostAllowed('127.0.0.1', 8123), false)
+  assert.equal(panelHostAllowed(undefined, 8123), false)
+  await withTempDir('panel-serve-host', async dir => {
+    seed(dir, 'one.json', 'one', 1_700_000_000)
+    await withServer(dir, async ({ port }) => {
+      const get = (host, pathname) => new Promise((resolve, reject) => {
+        const request = http.request({ host: '127.0.0.1', port, path: pathname, headers: { Host: host } }, response => {
+          let body = ''
+          response.on('data', chunk => { body += String(chunk) })
+          response.on('end', () => resolve({ status: response.statusCode, body }))
+        })
+        request.once('error', reject)
+        request.end()
+      })
+      for (const pathname of ['/api/sessions', '/one.json', '/panel.html', '/']) {
+        const forged = await get(`attacker.example:${port}`, pathname)
+        assert.equal(forged.status, 403, pathname)
+        assert.doesNotMatch(forged.body, /"one"/u)
+      }
+      assert.equal((await get(`127.0.0.1:${port}`, '/api/sessions')).status, 200)
+      assert.equal((await get(`localhost:${port}`, '/one.json')).status, 200)
+    })
   })
 })
 

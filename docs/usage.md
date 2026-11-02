@@ -221,7 +221,8 @@ dsh-ops panel --port 8123      # fixed loopback port; 0 (default) asks the kerne
 
 The command prints `http://127.0.0.1:<port>/`, preselects the newest valid report and lists the
 other valid reports for switching. `--serve` is accepted as an explicit alias. It binds loopback
-only, reads that one directory, writes nothing, and names malformed reports it skipped. The capture
+only, answers only requests whose `Host` is `127.0.0.1`, `localhost` or `[::1]` on that port (others
+get 403, which blocks DNS rebinding), reads that one directory, writes nothing, and names malformed reports it skipped. The capture
 row itself still opens no port: only this operator command starts a server. Opening `panel.html`
 directly through `file://` still requires dragging the JSON in, because browsers block
 same-directory `fetch`; under any static server, append `?data=<sessionId>.json`.

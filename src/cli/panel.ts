@@ -181,6 +181,22 @@ function sendIndex(response: http.ServerResponse, dir: string, headOnly: boolean
 }
 
 /**
+ * Whether a request's `Host` header names this loopback server. Binding to
+ * 127.0.0.1 alone does not stop DNS rebinding: a page whose hostname was
+ * re-pointed at 127.0.0.1 is same-origin with itself and can read every
+ * report. Only loopback names on the bound port are answered; any other
+ * Host gets 403.
+ * @param {string | undefined} host - the request's `Host` header.
+ * @param {number} port - the port the server is bound to.
+ * @returns {boolean} true for `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`.
+ */
+export function panelHostAllowed(host: string | undefined, port: number): boolean {
+  if (typeof host !== 'string') return false
+  const value = host.trim().toLowerCase()
+  return ['127.0.0.1', 'localhost', '[::1]'].some(name => value === `${name}:${port}`)
+}
+
+/**
  * Create the read-only server for one capture directory. It starts listening
  * only when the caller calls `listen`; {@link listenPanel} is the helper.
  * @param {object} options - the directory to serve.
@@ -193,6 +209,10 @@ export function createPanelServer({ dir }: { dir: string }): http.Server {
   const root = path.resolve(dir)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`Not a panel capture directory: ${root}`)
   return http.createServer((request, response) => {
+    if (!panelHostAllowed(request.headers.host, request.socket.localPort ?? -1)) {
+      sendText(response, 403, 'refused: the Host header does not name this loopback server')
+      return
+    }
     const method = request.method ?? 'GET'
     if (method !== 'GET' && method !== 'HEAD') {
       response.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' })
