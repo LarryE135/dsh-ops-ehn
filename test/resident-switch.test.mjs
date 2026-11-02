@@ -38,6 +38,19 @@ await test('resident settings exist only on enhanced presets, default on, and ha
   assert.equal(resolveModeConfig({ residentTools: true }, 'minimal').residentTools, false)
 })
 
+await test('legacy publishBashTool in a merged mode section survives the bundle gates', () => {
+  for (const mode of ['standard', 'ptc', 'cordis']) {
+    const legacy = resolveMergedConfig({ [mode]: { publishBashTool: false } })
+    assert.equal(legacy[mode].config.bash, false, mode)
+    assert.equal(effectiveMode(legacy[mode], legacy.global).bash, false, mode)
+    assert.equal(resolveModeConfig(effectiveMode(legacy[mode], legacy.global), mode).publishBashTool, false, mode)
+    const explicit = resolveMergedConfig({ [mode]: { publishBashTool: false, bash: true } })
+    assert.equal(effectiveMode(explicit[mode], explicit.global).bash, true, mode)
+    const gated = resolveMergedConfig({ global: { bash: false }, [mode]: { publishBashTool: true } })
+    assert.equal(effectiveMode(gated[mode], gated.global).bash, false, mode)
+  }
+})
+
 requireWorker('resident-switch')
 let sequence = 0
 const names = (ctx, agent) => scopedToolNames(ctx, agent)

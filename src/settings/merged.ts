@@ -191,7 +191,8 @@ export function effectiveMode(state: FeatureState<ModeConfig>, global: GlobalSwi
   return {
     ...raw,
     residentTools: state.config.residentTools,
-    bash: flag(raw, 'bash', true) && global.bash,
+    // The mode resolver already folded the legacy `publishBashTool` key into `bash`.
+    bash: state.config.bash && global.bash,
     // The companion plugin replaces pwsh 5.1 only while the host shell stays visible.
     hidePwsh: flag(raw, 'hidePwsh', false) && global.hidePwsh && !pwsh7Link,
     hideOfficialTools: flag(raw, 'hideOfficialTools', true) && global.hideOfficialTools,
