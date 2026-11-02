@@ -52,6 +52,8 @@ Sync master with main | active
 3. **`publish`（`ubuntu-24.04`，`needs: gate`，仅 tag）**
    - 唯一持有 `contents: write` 的 job；不用任何 secret，只用 Actions 自带 `github.token`。
    - `gh release create ... --verify-tag` 创建，已存在则 `gh release upload --clobber` 覆盖资产；tarball 数量为 0 或缺 `SHA256SUMS` 时显式报错退出，不会发出空 Release。
+   - tag 含 `-`（SemVer 预发布，如 `v0.5.0-alpha3`）时追加 `--prerelease --latest=false`：预发布永远不会成为仓库的 Latest，跟随 `releases/latest` 的用户不会被推到不稳定版本；不含 `-` 的正式版保持 gh 默认。`scripts/check-workflows.mjs` 用桩 `gh` 实际执行这段脚本断言两种 tag 的参数。
+     A tag containing `-` (a SemVer prerelease such as `v0.5.0-alpha3`) is created with `--prerelease --latest=false`, so it never becomes the repository's Latest release; a plain tag keeps gh's default. `scripts/check-workflows.mjs` executes the step against a stub `gh` and asserts both cases.
    - 最后把 `SHA256SUMS` 写进本次 run 的 summary，便于核对。
 
 ## npm 发布：不在本工作流内（要改需 admin）

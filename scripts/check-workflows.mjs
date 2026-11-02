@@ -5,8 +5,11 @@
 // cannot see is the silent one: a workflow that stops running, or that quietly stops blocking a
 // merge. These assertions are cheap, depend only on the repository's own `yaml`, and pin exactly
 // the properties that branch protection and a merge queue rely on.
+import { spawnSync } from 'node:child_process'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 
@@ -130,9 +133,45 @@ check(JSON.stringify(statusRule?.required_status_checks) === JSON.stringify([{ c
 // documented, because a half-wired publish is worse than none. The assertion is tied to the gated
 // rewrite's `publish` job: the legacy file still names `NPM_TOKEN`, and #177 replaces that path, so
 // pinning the *new* shape is what makes this check harden the moment the rewrite lands.
+// Run the publish step's own script against a stub `gh` and return the `release create` arguments.
+function releaseCreateArgs(script, tag) {
+  const dir = mkdtempSync(join(tmpdir(), 'check-workflows-release-'))
+  try {
+    mkdirSync(join(dir, 'bin'))
+    mkdirSync(join(dir, 'dist-release'))
+    writeFileSync(join(dir, 'dist-release', 'dsh-ops-linux-x64.tgz'), '')
+    writeFileSync(join(dir, 'dist-release', 'SHA256SUMS'), '')
+    const log = join(dir, 'gh.log')
+    // `release view` reports a missing Release, so the script takes the create path.
+    writeFileSync(join(dir, 'bin', 'gh'), `#!/usr/bin/env bash\n[ "$2" = view ] && exit 1\nprintf '%s\\n' "$@" > '${log}'\n`)
+    chmodSync(join(dir, 'bin', 'gh'), 0o755)
+    const result = spawnSync('bash', ['-c', script], {
+      cwd: dir, encoding: 'utf8',
+      env: { ...process.env, GITHUB_REF_NAME: tag, PATH: `${join(dir, 'bin')}${delimiter}${process.env.PATH}` },
+    })
+    if (result.error || result.status !== 0) throw new Error(`publish script for ${tag} failed: ${result.error?.message ?? result.stderr.trim()}`)
+    return readFileSync(log, 'utf8').split('\n').filter(Boolean)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 const release = workflows.get('release.yml')
 if (release) {
   checkPluginBuild('release.yml', release.doc.jobs ?? {}, ['native', 'gate'])
+  // A SemVer prerelease must never become the Latest release. Executed, not grepped: a flag that is
+  // present in the text but not reached for a `-` tag is the failure this check exists for.
+  const publish = (release.doc.jobs?.publish?.steps ?? []).find(step => /\bgh release create\b/.test(String(step.run ?? '')))
+  check(publish !== undefined, 'release.yml: the publish job creates the GitHub Release')
+  if (publish) {
+    for (const [tag, prerelease] of [['v0.5.0-alpha3', true], ['v0.5.0', false]]) {
+      let args = null
+      try { args = releaseCreateArgs(publish.run, tag) } catch (error) { check(false, `release.yml: ${error.message}`); continue }
+      const marked = args[0] === 'release' && args[1] === 'create' && args.includes('--prerelease') && args.includes('--latest=false')
+      const plain = args[0] === 'release' && args[1] === 'create' && !args.includes('--prerelease') && !args.some(arg => arg.startsWith('--latest'))
+      check(prerelease ? marked : plain, `release.yml: ${tag} is published ${prerelease ? 'as a prerelease that is not Latest' : 'as a regular release'} (gh ${args.join(' ')})`)
+    }
+  }
   if (release.doc.jobs?.publish) {
     check(!/\$\{\{\s*secrets\./.test(release.text), 'release.yml: the gated publish path consumes no repository secrets')
   } else {

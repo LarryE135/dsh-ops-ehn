@@ -10,7 +10,7 @@ a reviewer can trust a green PR without re-running anything by hand.
 | --- | --- | --- | --- |
 | `ci.yml` — **Cross-platform validation** | `push: main`, `pull_request: main`, `merge_group`, manual dispatch | **Yes** (via the single `CI required` check) | The functional gate on Linux and macOS arm64 (blocking), macOS Intel and Windows (non-blocking signals), plus the Node floor, the source size gate, workflow lint and the tool trial |
 | `sync-master.yml` — **Sync master with main** | `push: main`, manual dispatch | No | Fast-forwards the `master` mirror; fast-forward only, so a divergent `master` fails loudly |
-| `release.yml` — **Release** | `push: v*` tags, manual dispatch | No (`disabled_manually` today) | Builds the four declared targets, gates them, and publishes the GitHub Release. Nothing here runs on a branch or a pull request |
+| `release.yml` — **Release** | `push: v*` tags, manual dispatch | No (`disabled_manually` today) | Builds the four declared targets, gates them, and publishes the GitHub Release (a `-` prerelease tag as a prerelease that never becomes Latest). Nothing here runs on a branch or a pull request |
 
 ### Jobs inside `ci.yml`
 
