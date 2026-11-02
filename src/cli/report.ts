@@ -26,7 +26,7 @@ import {
   renderToolingPolicy,
 } from '../policy.js'
 import { resolveWorker } from '../execution/runtime.js'
-import { bashIpcReport, restrictedCompatibility } from '../bash-ipc.js'
+import { bashIpcReport, restrictedCompatibility, QUARANTINE_RETAIN } from '../bash-ipc.js'
 import type { BashIpcInventory } from '../bash-ipc.js'
 import { resolveShells } from '../shells.js'
 
@@ -213,8 +213,8 @@ export function printLadder(report: LadderReport) {
   console.log(`  generations: ${report.bashIpc.generations} (${megabytes(report.bashIpc.totalBytes)} MB in this cache)`)
   if (report.bashIpc.entries.length > 0) {
     const quarantined = report.bashIpc.entries.filter((entry) => entry.kind === 'quarantine').length
-    const suffix = quarantined > 0 ? ` + ${quarantined} quarantined generation(s)` : ''
-    console.log(`  reclaimable: ${megabytes(report.bashIpc.reclaimableBytes)} MB${suffix} — the next confined Windows Bash call reclaims it`)
+    const suffix = quarantined > 0 ? ` (${quarantined} quarantined generation(s); the newest ${QUARANTINE_RETAIN} are kept)` : ''
+    console.log(`  reclaimable: ${megabytes(report.bashIpc.reclaimableBytes)} MB${suffix} — the next confined Windows Bash call reclaims idle entries; \`dsh-ops bash-runtime clean-cache --yes --all-hosts-stopped\` reclaims the rest`)
   }
 
   console.log('\nRouting: repository tools → bash → host PowerShell')

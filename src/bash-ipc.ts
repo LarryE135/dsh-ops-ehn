@@ -193,7 +193,7 @@ export function renameWithRetry(from: string, to: string, {
     }
   }
 }
-/** Move one unverifiable generation aside, keeping the two most recent quarantines.
+/** Move one unverifiable generation aside; sweeps keep the {@link QUARANTINE_RETAIN} most recent quarantines.
  *
  *  Renaming keeps a generation that may still belong to a running process intact, and gives the next
  *  attempt somewhere to stage into. The rename is retried by {@link renameWithRetry}; `rename` is
@@ -203,11 +203,14 @@ export function quarantineGeneration(target: string, {rename}: { rename?: (from:
   if(!plainTree(target)||!idleGeneration(target))throw Error('Bash IPC refuses to quarantine a linked, legacy or leased generation; stop all confined shells and remove it manually.')
   const quarantine=`${target}.bad-${Date.now().toString(36)}`
   renameWithRetry(target,quarantine,{rename})
-  // Quarantines are retained: rename success never proves an old runtime is unused.
+  // Only an idle (never-leased) generation is quarantined; {@link reclaimBashGenerations} keeps
+  // the QUARANTINE_RETAIN most recent and reclaims older ones under the same eligibility rules.
   console.error(`dsh-ops: quarantined an unverifiable bash runtime generation at ${quarantine}; staging a fresh one. Delete it once no confined shell is running.`)
   return quarantine
 }
 
+/** Quarantines kept for diagnosis; older ones are reclaimed like any stale generation. */
+export const QUARANTINE_RETAIN=2
 /** A directory under `<DSH_HOME>/dsh-ops/bash-ipc` and what it costs on disk. */
 export interface BashIpcEntry {
   name: string
@@ -272,7 +275,8 @@ export function bashIpcInventory({home=process.env.DSH_HOME ?? path.join(os.home
   const stale=entries.filter(entry=>entry.kind==='generation'&&!entry.current)
   // One previous generation is retained on purpose: a second profile or a process that is still
   // running the old payload may need it, and a directory that cannot be moved aside is kept.
-  const reclaimable=[...stale.slice(1),...entries.filter(entry=>entry.kind==='retired')].filter(entry=>idleGeneration(path.join(root,entry.name)))
+  const quarantines=entries.filter(entry=>entry.kind==='quarantine')
+  const reclaimable=[...stale.slice(1),...quarantines.slice(QUARANTINE_RETAIN),...entries.filter(entry=>entry.kind==='retired')].filter(entry=>idleGeneration(path.join(root,entry.name)))
   return {
     root, current,
     generations: entries.filter(entry=>entry.kind==='generation').length,
@@ -336,6 +340,21 @@ export function reclaimBashGenerations(root: string, current: string, {
       // Renamed but not deleted: the next sweep retries the `.stale-` directory.
       result.kept.push(entry.name)
     }
+  }
+  // Quarantines beyond the newest QUARANTINE_RETAIN are reclaimed under the same rules (#A-shells-06).
+  const quarantines=entries.filter(entry=>entry.isDirectory()&&QUARANTINE_NAME.test(entry.name))
+    .map(entry=>{
+      let mtimeMs=0
+      try{ mtimeMs=fs.lstatSync(path.join(root,entry.name)).mtimeMs }catch{ /* raced with a sweep */ }
+      return {name:entry.name,mtimeMs}
+    })
+    .sort((a,b)=>b.mtimeMs-a.mtimeMs||(a.name<b.name?-1:1))
+  for(const entry of quarantines.slice(QUARANTINE_RETAIN)){
+    const target=path.join(root,entry.name)
+    if(!eligible(target)){result.kept.push(entry.name);continue}
+    const usage=directoryUsage(target)
+    if(dryRun){result.removed.push(entry.name);result.bytes+=usage.bytes;continue}
+    try{ remove(target);result.removed.push(entry.name);result.bytes+=usage.bytes }catch{ result.kept.push(entry.name) }
   }
   // Sweeps interrupted between rename and delete leave a full generation behind; finish those too.
   for(const entry of entries){
