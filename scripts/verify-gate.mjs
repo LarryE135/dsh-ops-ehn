@@ -43,6 +43,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { collectProcessOutput } from './lib/gate-output.mjs'
+import { spawnPlan } from './lib/gate-spawn.mjs'
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -106,7 +107,9 @@ const stepFailures = []
 async function run(title, command, args, { env = {}, optional = false, cwd = PACKAGE_ROOT } = {}) {
   const shown = [command, ...args].join(' ')
   process.stdout.write(`\n=== ${title}\n$ ${shown}\n`)
-  const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, shell: process.platform === 'win32' })
+  // No shell on any platform for an args array: cmd.exe would re-split a path with a space (see gate-spawn).
+  const plan = spawnPlan(command, args)
+  const child = spawn(plan.file, plan.args, { cwd, env: { ...process.env, ...env }, shell: plan.shell })
   // The listeners go on before the streams are touched. A `spawn` that cannot find its tool emits
   // `error` immediately, and an `error` event with no listener takes the whole runner down with a
   // stack trace instead of reporting "this host cannot answer the gate" (exit 2).
@@ -225,6 +228,8 @@ async function main() {
 
   // The artifact, not just the build. `npm pack` honours `files`, and a package that silently drops
   // `runtime/` installs fine and then fails in the user's profile — so check the thing users get.
+  // Declared before the pack step, which is the first to record an assertion failure.
+  const failures = []
   const packDir = mkdtempSync(path.join(tmpdir(), 'dsh-ops-pack-'))
   await run('pack the release artifact', 'npm', ['pack', '--pack-destination', packDir])
   const tarball = readdirSync(packDir).find(entry => entry.endsWith('.tgz'))
@@ -238,7 +243,7 @@ async function main() {
   }
 
   // The assertions. Failures here are the point of the script, not a detail of it.
-  const failures = [...stepFailures]
+  failures.unshift(...stepFailures)
   if (!(typeof manifestChecks === 'number' && manifestChecks >= MANIFEST_CHECK_FLOOR)) failures.push(`manifest checks: expected at least ${MANIFEST_CHECK_FLOOR}, got ${manifestChecks ?? 'none reported'}`)
   if (!summary.reported) failures.push('no suite summary line; the runner did not finish')
   if (summary.failed > 0) failures.push(`the runner reported ${summary.failed} failing suite(s); see its output above for the check names`)

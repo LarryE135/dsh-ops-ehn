@@ -7,6 +7,8 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+- Start release-gate steps without a shell on Windows: npm runs as `node <npm-cli.js>` and every argument stays one argv entry, so a temp path with a space (`C:\Users\John Doe\...`) no longer splits and Node 24 stops warning DEP0190; an `npm pack` that produces no tarball is reported by name instead of crashing on an uninitialized `failures`.
+- Windows 上发布门禁的各步骤不再经过 shell：npm 以 `node <npm-cli.js>` 运行，每个参数保持为单个 argv，含空格的临时目录（如 `C:\Users\John Doe\...`）不再被拆开，Node 24 也不再报 DEP0190；`npm pack` 未产出 tarball 时给出具名失败，而不是因 `failures` 未初始化而崩溃。
 - Keep Native file routing separate from the independent Bash prompt section, so resident Native + Shell consumers do not repeat Bash guidance or advertise host PowerShell routing. Keep deployment guidance single-owned across Bash, Native and discovery sections, including withdrawal and reload.
 - 将 Native 文件路由提示与独立 Bash 提示段分开，避免 Native + Shell 常驻消费者重复 Bash 指导或把 Bash 宣传为宿主 PowerShell 路由。部署指导在 Bash、Native 与发现提示段之间仅保留一份，并覆盖撤回与重载。
 - Update preset hints and rendered settings UI to describe default Bash/PowerShell coexistence; hiding host PowerShell remains an explicit choice.
